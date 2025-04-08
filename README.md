@@ -67,6 +67,7 @@ The Dog Tracker is designed to monitor the location of your dog in real time usi
 
 ### Battery Voltage Divider
 
+<pre>
    + (Battery Positive)
          │
         R1 (e.g., 100kΩ)
@@ -76,6 +77,7 @@ The Dog Tracker is designed to monitor the location of your dog in real time usi
         R2 (e.g., 47kΩ)
          │
    GND (Battery Negative)
+</pre>
 
 *Ensure that the ADC pin is connected to the junction between R1 and R2, and that the battery ground is common with the ESP32 ground.*
 
