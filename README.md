@@ -1,3 +1,81 @@
+# Dog Tracker Project
+
+A GPS-based dog tracker built on an ESP32 that logs location data to GPX files, monitors battery status, and provides an interactive web dashboard for controlling features such as tracking start/stop, auto-stop toggling, and Wi-Fi configuration.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Hardware Requirements](#hardware-requirements)
+- [Circuit Diagram & Wiring](#circuit-diagram--wiring)
+- [Software and Libraries](#software-and-libraries)
+- [Installation and Setup](#installation-and-setup)
+- [Web Interface Endpoints](#web-interface-endpoints)
+- [Calibration and Configuration](#calibration-and-configuration)
+- [Future Improvements](#future-improvements)
+- [License](#license)
+
+## Overview
+
+The Dog Tracker is designed to monitor the location of your dog in real time using a GPS module, log the track in GPX format, and provide control over tracking features via a built-in web server on the ESP32. The device automatically switches between Station mode (connecting to a home Wi-Fi network) and Access Point (AP) mode (when away from home or if Wi-Fi credentials are not set), ensuring you can always connect and manage the tracker.
+
+## Features
+
+- **GPS Tracking:**  
+  - Continuously reads GPS data using TinyGPS++.
+  - Logs GPX track points with latitude, longitude, elevation, and timestamps.
+  
+- **Wi-Fi Modes:**  
+  - Automatically switches between Station and AP modes based on GPS location (home zone defined by a trigger radius) and the availability of Wi-Fi credentials.
+  - Includes a dwell interval (15 seconds) between mode switches and limits repeated connection attempts with a failure flag.
+
+- **Web Dashboard:**  
+  - Displays tracking statistics (distance, speed, elevation, GPS coordinates, battery voltage, Wi-Fi status, etc.).
+  - Interactive controls:
+    - **Set Home:** Set the home location based on the current GPS fix.
+    - **Track/Tracking Toggle:** Button displays "Track" (green) when not tracking and "Tracking" (red) when active.
+    - **AutoStop Toggle:** Button toggles auto-stop tracking (stopping tracking when near home) and displays "AutoStop: On" (orange) or "AutoStop: Off" (light blue).
+    - **Wi-Fi Config:** Configure and save Wi-Fi credentials.
+  - Track files appear as download links and are accompanied by "Delete" buttons. A "Delete All Tracks" button is also provided.
+
+- **Battery Monitoring:**  
+  - Measures battery voltage via an external voltage divider connected to an ADC pin (e.g., GPIO33).
+  - Displays the battery voltage on the dashboard.
+
+- **LED Indicators:**  
+  - **GPS LED (GPIO12):** Blinks based on GPS fix status.
+  - **Wi-Fi LED (GPIO13):** Indicates Wi-Fi mode (AP vs. Station) with different blink patterns.
+  - **Tracking LED (GPIO15 or 27):** Blinks when tracking is active (two blinks every 5 seconds) and stays off when not tracking.
+
+- **Persistent Configuration:**  
+  - Uses the ESP32 Preferences library to store Wi-Fi credentials and the home location across reboots.
+
+## Hardware Requirements
+
+- **Microcontroller:** ESP32 (e.g., Adafruit ESP32 Feather Huzzah)
+- **GPS Module:** (Compatible with ESP32 and TinyGPS++; e.g., NEO-6M)
+- **Power Supply:**  
+  - A LiPo battery (e.g., 3.87 V, 930 mAh) with onboard charger circuitry.
+- **Voltage Divider:**  
+  - Two resistors (e.g., R1 = 100 kΩ and R2 = 47 kΩ, or as measured/calibrated) for stepping down the battery voltage.
+- **LEDs:**  
+  - Three status LEDs with current-limiting resistors for GPS, Wi-Fi, and Tracking indicators.
+- **Additional Components:**  
+  - Connecting wires, breadboard or perfboard for prototyping.
+
+## Circuit Diagram & Wiring
+
+### Battery Voltage Divider
+
+   + (Battery Positive)
+         │
+        R1 (e.g., 100kΩ)
+         │
+         ├──────> To ESP32 ADC Pin (e.g., GPIO33)
+         │
+        R2 (e.g., 47kΩ)
+         │
+   GND (Battery Negative)
 
 *Ensure that the ADC pin is connected to the junction between R1 and R2, and that the battery ground is common with the ESP32 ground.*
 
