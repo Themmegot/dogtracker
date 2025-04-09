@@ -5,10 +5,7 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <vector>
-
-// Include NTP libraries
-#include <WiFiUdp.h>
-#include <NTPClient.h>
+#include <time.h>  // for configTime and getLocalTime
 
 // --- Global Variables ---
 Preferences preferences;  // Used for persistent configuration
@@ -56,17 +53,20 @@ unsigned long trackingStartTime = 0;
 unsigned long lastLogTime = 0;
 const unsigned long logInterval = 1000;  // Log interval in milliseconds
 
-// New flag to control automatic tracking.  
-// When true, the tracker auto-starts when leaving home and auto-stops when returning home.  
+// New flag to control automatic tracking.
+// When true, the tracker auto-starts when leaving home and auto-stops when returning home.
 // When false, tracking is controlled manually by the "Track" button.
 bool autoTracking = true;
 
 // Web server object
 WebServer server(80);
 
-// NTP Objects
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000); // Time offset 0; update every 60 sec
+// --- Time Configuration ---
+// Use configTime() to set up NTP. (Time offset and DST offset set to 0 here.)
+const char* ntpServer1 = "pool.ntp.org";
+const char* ntpServer2 = "time.nist.gov";
+const long gmtOffset_sec = 0;      // Adjust for your time zone
+const int daylightOffset_sec = 0;  // Adjust for DST if needed
 
 // --- LED Pin Definitions ---
 const uint8_t gpsLedPin = 12;       // LED for GPS status
@@ -97,8 +97,8 @@ const uint8_t trackingLedPatternLength = 4;
 uint8_t trackingLedPatternIndex = 0;
 unsigned long trackingLedNextChange = 0;
 
-// Define the ADC pin for battery measurement.
-const int batteryAdcPin = 33;  // Use an ADC-capable pin, e.g. GPIO33
+// Define the ADC pin used for battery measurement.
+const int batteryAdcPin = 33;  // Use an ADC-capable pin (e.g., GPIO33)
 
 // Calibration constants:
 // For a divider with R1=100k and R2=47k the scaling factor is approximately 3.125
@@ -126,6 +126,7 @@ void saveHomeConfig();
 void handleDownload();
 float readBatteryVoltage();
 String readLogFile();
+void clearLog();
 
 // --- Setup Function ---
 void setup() {
@@ -136,10 +137,10 @@ void setup() {
   preferences.begin("config", false);
   loadConfiguration();  // Loads wifiSsid, wifiPassword, homeZoneLat, homeZoneLon.
   
-  // Initialize NTP client.
-  timeClient.begin();
+  // Initialize time via NTP.
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
   
-  // Set ADC attenuation (for example, ADC_11db allows ~3.9V at ADC input).
+  // Set ADC attenuation (e.g., ADC_11db allows ~3.9V at ADC input).
   analogSetAttenuation(ADC_11db);
 
   // Set LED pins as outputs.
@@ -179,10 +180,7 @@ void loop() {
     gps.encode(c);
   }
   
-  // Update the NTP time if WiFi is connected.
-  if (wifiConnected && WiFi.status() == WL_CONNECTED) {
-    timeClient.update();
-  }
+  // No additional NTP update is necessary here since configTime() has set the system clock.
   
   if (gps.location.isUpdated()) {
     double currentLat = gps.location.lat();
@@ -264,10 +262,11 @@ void loop() {
 }
 
 // --- Supporting Functions ---
+
 float getDistance(double lat1, double lon1, double lat2, double lon2) {
   const double R = 6371.0;
   double dLat = radians(lat2 - lat1);
-  double dLon = radians(lon2 - lon1);
+  double dLon = radians(lat2 - lat1);
   double a = sin(dLat/2) * sin(dLat/2) +
              cos(radians(lat1)) * cos(radians(lat2)) *
              sin(dLon/2) * sin(dLon/2);
@@ -402,23 +401,14 @@ void logEvent(String message) {
   File logFile = LittleFS.open("/log.txt", "a");
   if (logFile) {
     String timestamp;
-    // If WiFi is connected, use NTP time.
-    if (wifiConnected && WiFi.status() == WL_CONNECTED) {
-      timestamp = String(timeClient.getEpochTime());
-    }
-    // Otherwise, if GPS time is valid, use that.
-    else if (gps.location.isValid()) {
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
       char timeStr[30];
-      sprintf(timeStr, "%04d-%02d-%02d %02d:%02d:%02d", 
-              gps.date.year(), gps.date.month(), gps.date.day(),
-              gps.time.hour(), gps.time.minute(), gps.time.second());
+      strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
       timestamp = String(timeStr);
-    }
-    // Fallback to millis().
-    else {
+    } else {
       timestamp = String(millis());
     }
-    
     logFile.print(timestamp);
     logFile.print(": ");
     logFile.println(message);
@@ -438,6 +428,18 @@ String readLogFile() {
     logContent = "Log file not found.";
   }
   return logContent;
+}
+
+void clearLog() {
+  if (LittleFS.exists("/log.txt")) {
+    LittleFS.remove("/log.txt");
+  }
+  // Optionally recreate an empty log file:
+  File logFile = LittleFS.open("/log.txt", "w");
+  if (logFile) {
+    logFile.println("Log cleared.");
+    logFile.close();
+  }
 }
 
 String getTrackList() {
@@ -631,8 +633,15 @@ void startWebServer() {
   // Endpoint to view the log file.
   server.on("/log", HTTP_GET, [](){
     String logContent = readLogFile();
-    String html = buildPage("Log File", "<pre>" + logContent + "</pre>");
+    String html = buildPage("Log File", "<pre>" + logContent + "</pre><p><a href='/deleteLog' class='button' style='background-color:#0077cc;'>Delete Log</a></p>");
     server.send(200, "text/html", html);
+  });
+  
+  // Endpoint to delete the log file.
+  server.on("/deleteLog", HTTP_GET, [](){
+    clearLog();
+    server.sendHeader("Location", "/log", true);
+    server.send(302, "text/plain", "Redirecting...");
   });
   
   // Dashboard endpoint.
@@ -649,9 +658,9 @@ void startWebServer() {
     // Build Tracking button (manual toggle).
     String trackButton;
     if (isTracking)
-      trackButton = "<a href='/toggleTracking' class='button' style='background-color:red;'>Tracking: on</a>";
+      trackButton = "<a href='/toggleTracking' class='button' style='background-color:red;'>Tracking: On</a>";
     else
-      trackButton = "<a href='/toggleTracking' class='button' style='background-color:green;'>Tracking: off</a>";
+      trackButton = "<a href='/toggleTracking' class='button' style='background-color:green;'>Tracking: Off</a>";
     
     // Build Auto Tracking toggle button.
     String autoTrackButton;
