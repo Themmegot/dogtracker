@@ -6,6 +6,10 @@
 #include <Preferences.h>
 #include <vector>
 
+// Include NTP libraries
+#include <WiFiUdp.h>
+#include <NTPClient.h>
+
 // --- Global Variables ---
 Preferences preferences;  // Used for persistent configuration
 
@@ -52,11 +56,17 @@ unsigned long trackingStartTime = 0;
 unsigned long lastLogTime = 0;
 const unsigned long logInterval = 1000;  // Log interval in milliseconds
 
-// New flag to control auto-stop tracking (if true, tracking stops automatically when at home)
-bool autoStopTracking = true;
+// New flag to control automatic tracking.  
+// When true, the tracker auto-starts when leaving home and auto-stops when returning home.  
+// When false, tracking is controlled manually by the "Track" button.
+bool autoTracking = true;
 
 // Web server object
 WebServer server(80);
+
+// NTP Objects
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000); // Time offset 0; update every 60 sec
 
 // --- LED Pin Definitions ---
 const uint8_t gpsLedPin = 12;       // LED for GPS status
@@ -87,14 +97,13 @@ const uint8_t trackingLedPatternLength = 4;
 uint8_t trackingLedPatternIndex = 0;
 unsigned long trackingLedNextChange = 0;
 
-// Define the ADC pin that is used for battery measurement.
-const int batteryAdcPin = 33;    // Use an ADC-capable pin (e.g., GPIO34)
+// Define the ADC pin for battery measurement.
+const int batteryAdcPin = 33;  // Use an ADC-capable pin, e.g. GPIO33
 
 // Calibration constants:
-// For a divider with R1=100k and R2=47k the scaling factor is approximately 3.147 (1/0.32)
-// Adjust this value if your resistor values differ or if calibration is needed.
-const float voltageDividerFactor = 3.125;  
-const float ADCRefVoltage = 3.3;          // ESP32 ADC reference voltage
+// For a divider with R1=100k and R2=47k the scaling factor is approximately 3.125
+const float voltageDividerFactor = 3.125;
+const float ADCRefVoltage = 3.3;  // ESP32 ADC reference voltage
 
 // --- Function Prototypes ---
 float getDistance(double lat1, double lon1, double lat2, double lon2);
@@ -115,6 +124,8 @@ void loadConfiguration();
 void saveWiFiConfig();
 void saveHomeConfig();
 void handleDownload();
+float readBatteryVoltage();
+String readLogFile();
 
 // --- Setup Function ---
 void setup() {
@@ -123,11 +134,14 @@ void setup() {
   
   // Initialize persistent configuration.
   preferences.begin("config", false);
-  loadConfiguration();  // Loads wifiSsid, wifiPassword, homeZoneLat, and homeZoneLon.
-
-  // ADC channel attenuation to 11 dB
-  analogSetAttenuation(ADC_11db); // This sets the attenuation for all analogRead() calls
+  loadConfiguration();  // Loads wifiSsid, wifiPassword, homeZoneLat, homeZoneLon.
   
+  // Initialize NTP client.
+  timeClient.begin();
+  
+  // Set ADC attenuation (for example, ADC_11db allows ~3.9V at ADC input).
+  analogSetAttenuation(ADC_11db);
+
   // Set LED pins as outputs.
   pinMode(gpsLedPin, OUTPUT);
   digitalWrite(gpsLedPin, LOW);
@@ -165,6 +179,11 @@ void loop() {
     gps.encode(c);
   }
   
+  // Update the NTP time if WiFi is connected.
+  if (wifiConnected && WiFi.status() == WL_CONNECTED) {
+    timeClient.update();
+  }
+  
   if (gps.location.isUpdated()) {
     double currentLat = gps.location.lat();
     double currentLon = gps.location.lng();
@@ -174,10 +193,10 @@ void loop() {
     float distanceFromHome = getDistance(currentLat, currentLon, homeZoneLat, homeZoneLon);
     updateWiFiMode(distanceFromHome);
     
-    if (autoStopTracking) {
-      // Automatically start tracking when leaving home.
+    if (autoTracking) {
+      // Auto tracking: start when leaving home.
       if (distanceFromHome > triggerRadiusKm && !hasLeftHome) {
-        logEvent("Left home zone; starting tracking");
+        logEvent("Left home zone; auto starting tracking");
         hasLeftHome = true;
         isTracking = true;
         createNewGpx();
@@ -187,9 +206,9 @@ void loop() {
         lastLogTime = millis();
         pointCount = 1;
       }
-      // Automatically stop tracking when returning home.
+      // Auto tracking: stop when returning home.
       if (distanceFromHome < triggerRadiusKm && isTracking) {
-        logEvent("Returned home; stopping tracking");
+        logEvent("Returned home; auto stopping tracking");
         if (gpxFile) {
           gpxFile.println("</trkseg>");
           gpxFile.println("</trk>");
@@ -246,12 +265,12 @@ void loop() {
 
 // --- Supporting Functions ---
 float getDistance(double lat1, double lon1, double lat2, double lon2) {
-  const double R = 6371.0;  
+  const double R = 6371.0;
   double dLat = radians(lat2 - lat1);
   double dLon = radians(lon2 - lon1);
-  double a = sin(dLat/2)*sin(dLat/2) +
-             cos(radians(lat1))*cos(radians(lat2))*
-             sin(dLon/2)*sin(dLon/2);
+  double a = sin(dLat/2) * sin(dLat/2) +
+             cos(radians(lat1)) * cos(radians(lat2)) *
+             sin(dLon/2) * sin(dLon/2);
   double c = 2 * atan2(sqrt(a), sqrt(1 - a));
   return R * c;
 }
@@ -382,11 +401,43 @@ void writeGpxPoint(double lat, double lon, int y, int m, int d, int h, int min, 
 void logEvent(String message) {
   File logFile = LittleFS.open("/log.txt", "a");
   if (logFile) {
-    logFile.print(millis());
+    String timestamp;
+    // If WiFi is connected, use NTP time.
+    if (wifiConnected && WiFi.status() == WL_CONNECTED) {
+      timestamp = String(timeClient.getEpochTime());
+    }
+    // Otherwise, if GPS time is valid, use that.
+    else if (gps.location.isValid()) {
+      char timeStr[30];
+      sprintf(timeStr, "%04d-%02d-%02d %02d:%02d:%02d", 
+              gps.date.year(), gps.date.month(), gps.date.day(),
+              gps.time.hour(), gps.time.minute(), gps.time.second());
+      timestamp = String(timeStr);
+    }
+    // Fallback to millis().
+    else {
+      timestamp = String(millis());
+    }
+    
+    logFile.print(timestamp);
     logFile.print(": ");
     logFile.println(message);
     logFile.close();
   }
+}
+
+String readLogFile() {
+  String logContent = "";
+  File logFile = LittleFS.open("/log.txt", "r");
+  if (logFile) {
+    while (logFile.available()) {
+      logContent += char(logFile.read());
+    }
+    logFile.close();
+  } else {
+    logContent = "Log file not found.";
+  }
+  return logContent;
 }
 
 String getTrackList() {
@@ -406,7 +457,6 @@ String getTrackList() {
       fileNames.push_back(filename);
     file = root.openNextFile();
   }
-  // Build HTML: each file now shows a download button and a delete button.
   for (size_t i = 0; i < fileNames.size(); i++) {
     list += "<p><a href='/download?file=" + fileNames[i] + "' class='button' style='background-color:#0077cc;'>Download " + fileNames[i] + "</a> ";
     list += "<a href='/deleteTrack?file=" + fileNames[i] + "' class='button' style='background-color:#0077cc;'>Delete</a></p>";
@@ -511,14 +561,12 @@ void updateTrackingLed() {
   }
 }
 
-// Function to read battery voltage.
 float readBatteryVoltage() {
   const int numReadings = 10;
   long total = 0;
-  
   for (int i = 0; i < numReadings; i++) {
     total += analogRead(batteryAdcPin);
-    delay(10); // a brief delay between samples
+    delay(10);
   }
   float averageReading = (float)total / numReadings;
   float adcVoltage = (averageReading / 4095.0) * ADCRefVoltage;
@@ -580,6 +628,13 @@ void startWebServer() {
   // Endpoint to serve GPX files for download.
   server.on("/download", HTTP_GET, handleDownload);
   
+  // Endpoint to view the log file.
+  server.on("/log", HTTP_GET, [](){
+    String logContent = readLogFile();
+    String html = buildPage("Log File", "<pre>" + logContent + "</pre>");
+    server.send(200, "text/html", html);
+  });
+  
   // Dashboard endpoint.
   server.on("/", HTTP_GET, [](){
 #ifdef ESP32
@@ -591,19 +646,19 @@ void startWebServer() {
 #endif
     unsigned long durationSec = isTracking ? ((millis() - trackingStartTime) / 1000) : 0;
     
-    // Build Tracking button (label and colour change).
+    // Build Tracking button (manual toggle).
     String trackButton;
     if (isTracking)
-      trackButton = "<a href='/toggleTracking' class='button' style='background-color:red;'>Tracking</a>";
+      trackButton = "<a href='/toggleTracking' class='button' style='background-color:red;'>Tracking: on</a>";
     else
-      trackButton = "<a href='/toggleTracking' class='button' style='background-color:green;'>Track</a>";
+      trackButton = "<a href='/toggleTracking' class='button' style='background-color:green;'>Tracking: off</a>";
     
-    // Build AutoStop Tracking button.
-    String autoStopButton;
-    if (autoStopTracking)
-      autoStopButton = "<a href='/toggleAutoStop' class='button' style='background-color:orange;'>AutoStop: On</a>";
+    // Build Auto Tracking toggle button.
+    String autoTrackButton;
+    if (autoTracking)
+      autoTrackButton = "<a href='/toggleAutoTrack' class='button' style='background-color:red;'>Auto Tracking: On</a>";
     else
-      autoStopButton = "<a href='/toggleAutoStop' class='button' style='background-color:lightblue;'>AutoStop: Off</a>";
+      autoTrackButton = "<a href='/toggleAutoTrack' class='button' style='background-color:green;'>Auto Tracking: Off</a>";
     
     String html = R"HTML(
 <!DOCTYPE html>
@@ -643,9 +698,10 @@ void startWebServer() {
     <a href='/setHome' class='button' style='background-color:#0077cc;'>Set Home</a>
     )HTML";
     html += trackButton;
-    html += autoStopButton;
+    html += autoTrackButton;
     html += R"HTML(
     <a href='/wifiConfig' class='button' style='background-color:#0077cc;'>WiFi Config</a>
+    <a href='/log' class='button' style='background-color:#0077cc;'>View Log</a>
   </div>
   <div>
     <h2>Recorded Tracks</h2>
@@ -693,7 +749,7 @@ void startWebServer() {
     server.send(200, "text/html", buildPage("Set Home", body));
   });
   
-  // Endpoint to toggle tracking.
+  // Endpoint to toggle tracking (manual control).
   server.on("/toggleTracking", HTTP_GET, [](){
     if (isTracking) {
       logEvent("Manual stop tracking triggered");
@@ -719,10 +775,10 @@ void startWebServer() {
     server.send(302, "text/plain", "Redirecting...");
   });
   
-  // Endpoint to toggle auto-stop tracking.
-  server.on("/toggleAutoStop", HTTP_GET, [](){
-    autoStopTracking = !autoStopTracking;
-    logEvent(String("AutoStop tracking toggled to: ") + (autoStopTracking ? "On" : "Off"));
+  // Endpoint to toggle auto tracking.
+  server.on("/toggleAutoTrack", HTTP_GET, [](){
+    autoTracking = !autoTracking;
+    logEvent(String("Auto Tracking toggled to: ") + (autoTracking ? "On" : "Off"));
     server.sendHeader("Location", "/", true);
     server.send(302, "text/plain", "Redirecting...");
   });
