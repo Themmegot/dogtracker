@@ -5,38 +5,40 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <vector>
-#include <time.h>  // for configTime and getLocalTime
+#include <time.h>  // For configTime() and getLocalTime()
 
-// --- Global Variables ---
-Preferences preferences;  // Used for persistent configuration
+// ----------------------
+// Global Variables
+// ----------------------
+Preferences preferences;  // Persistent storage for WiFi credentials and home location
 
-// GPS module interface
-HardwareSerial gpsSerial(1);  // using Serial1 for GPS; adjust pins as necessary
+// GPS module interface (using Serial1)
+HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
 
-// File system variables
+// File system variables for GPX logging
 String currentGpxFilename;
 File gpxFile;
 
-// Wi‑Fi credentials (loaded from persistent storage)
+// Wi-Fi credentials (loaded from persistent storage)
 String wifiSsid;
 String wifiPassword;
 bool wifiConnected = false;
 bool inAPMode = false;
 
-// Maximum station connection attempts
+// Maximum attempts to connect as Station before falling back to AP mode
 const uint8_t maxStationConnectAttempts = 3;
 uint8_t stationConnectAttempts = 0;
-bool stationConnectFailure = false;  // Set when max attempts have failed
+bool stationConnectFailure = false;  // Flag set when max attempts are reached
 
-// Enforce a minimum delay between mode switches (in milliseconds)
+// Minimum delay between WiFi mode switches (in milliseconds)
 const unsigned long modeSwitchInterval = 15000;
 unsigned long lastModeSwitchTime = 0;
 
-// Home zone and trigger radius (loaded from persistent storage)
+// Home location (loaded from persistent storage) and trigger radius
 double homeZoneLat = 0.0;
 double homeZoneLon = 0.0;
-const float triggerRadiusKm = 0.1;  // Example threshold: 0.1 km
+const float triggerRadiusKm = 0.1;  // If distance < this, considered "home"
 
 // Tracking state variables
 bool isTracking = false;
@@ -51,61 +53,65 @@ double lastLon = 0.0;
 double lastAlt = 0.0;
 unsigned long trackingStartTime = 0;
 unsigned long lastLogTime = 0;
-const unsigned long logInterval = 1000;  // Log interval in milliseconds
+const unsigned long logInterval = 1000;  // Log every 1 second
 
-// New flag to control automatic tracking.
-// When true, the tracker auto-starts when leaving home and auto-stops when returning home.
-// When false, tracking is controlled manually by the "Track" button.
+// Auto Tracking flag: when true, tracker auto-starts when leaving home and auto-stops when returning
+// When false, tracking is controlled solely by the manual "Track" button.
 bool autoTracking = true;
 
-// Web server object
+// Web server instance
 WebServer server(80);
 
-// --- Time Configuration ---
-// Use configTime() to set up NTP. (Time offset and DST offset set to 0 here.)
+// ----------------------
+// Time Configuration (NTP)
+// ----------------------
+// Using built-in time functions via configTime() to set system time.
+// (Adjust gmtOffset_sec and daylightOffset_sec as required.)
 const char* ntpServer1 = "pool.ntp.org";
 const char* ntpServer2 = "time.nist.gov";
-const long gmtOffset_sec = 0;      // Adjust for your time zone
-const int daylightOffset_sec = 0;  // Adjust for DST if needed
+const long gmtOffset_sec = 0;      
+const int daylightOffset_sec = 0;  
 
-// --- LED Pin Definitions ---
-const uint8_t gpsLedPin = 12;       // LED for GPS status
-const uint8_t wifiLedPin = 13;      // LED for WiFi status
-const uint8_t trackingLedPin = 15;  // LED for tracking status
-
-// --- LED Blink Patterns ---
-// GPS LED (pin 12)
-const uint16_t gpsNoFixPattern[] = {100, 100, 100, 700};
+// ----------------------
+// LED Pin Definitions and Blink Patterns
+// ----------------------
+// GPS LED on GPIO12
+const uint8_t gpsLedPin = 12;
+const uint16_t gpsNoFixPattern[] = {100, 100, 100, 700};  // When no GPS fix
 const uint8_t  gpsNoFixPatternLength = 4;
-const uint16_t gpsFixPattern[]   = {100, 14900};
+const uint16_t gpsFixPattern[]   = {100, 14900};           // When GPS fix is valid
 const uint8_t  gpsFixPatternLength = 2;
 uint8_t gpsLedPatternIndex = 0;
 unsigned long gpsLedNextChange = 0;
 
-// WiFi LED (pin 13)
-const uint16_t wifiStationPattern[] = {100, 14900};
+// WiFi LED on GPIO13
+const uint8_t wifiLedPin = 13;
+const uint16_t wifiStationPattern[] = {100, 14900};        // When in Station mode
 const uint8_t  wifiStationPatternLength = 2;
-const uint16_t wifiAPPattern[] = {100, 100, 100, 14700};
+const uint16_t wifiAPPattern[] = {100, 100, 100, 14700};     // When in Access Point mode
 const uint8_t  wifiAPPatternLength = 4;
 uint8_t wifiLedPatternIndex = 0;
 unsigned long wifiLedNextChange = 0;
 
-// Tracking LED (pin 15)
-// Pattern: two blinks every 5 seconds (200ms on, 200ms off, 200ms on, 4400ms off)
-const uint16_t trackingLedPattern[] = {200, 200, 200, 4400};
+// Tracking LED on GPIO15
+const uint8_t trackingLedPin = 15;
+const uint16_t trackingLedPattern[] = {200, 200, 200, 4400}; // Two blinks per cycle when tracking is active
 const uint8_t trackingLedPatternLength = 4;
 uint8_t trackingLedPatternIndex = 0;
 unsigned long trackingLedNextChange = 0;
 
-// Define the ADC pin used for battery measurement.
-const int batteryAdcPin = 33;  // Use an ADC-capable pin (e.g., GPIO33)
-
-// Calibration constants:
-// For a divider with R1=100k and R2=47k the scaling factor is approximately 3.125
+// ----------------------
+// ADC Setup for Battery Voltage
+// ----------------------
+// ADC pin for battery voltage measurement via voltage divider.
+const int batteryAdcPin = 33;
+// Calibration constants based on resistor divider (R1=100k, R2=47k gives ~3.125 scaling factor)
 const float voltageDividerFactor = 3.125;
-const float ADCRefVoltage = 3.3;  // ESP32 ADC reference voltage
+const float ADCRefVoltage = 3.3;  // Reference voltage for ADC
 
-// --- Function Prototypes ---
+// ----------------------
+// Function Prototypes
+// ----------------------
 float getDistance(double lat1, double lon1, double lat2, double lon2);
 void updateWiFiMode(float distanceFromHome);
 void startClientWiFi();
@@ -128,22 +134,24 @@ float readBatteryVoltage();
 String readLogFile();
 void clearLog();
 
-// --- Setup Function ---
+// ----------------------
+// Setup Function
+// ----------------------
 void setup() {
   Serial.begin(115200);
   Serial.println("System starting...");
   
   // Initialize persistent configuration.
   preferences.begin("config", false);
-  loadConfiguration();  // Loads wifiSsid, wifiPassword, homeZoneLat, homeZoneLon.
+  loadConfiguration();  // Loads WiFi credentials and home location
   
-  // Initialize time via NTP.
+  // Initialize system time via NTP
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
   
-  // Set ADC attenuation (e.g., ADC_11db allows ~3.9V at ADC input).
+  // Set ADC attenuation for battery measurement (ADC_11db allows ~3.9V input)
   analogSetAttenuation(ADC_11db);
 
-  // Set LED pins as outputs.
+  // Configure LED pins as outputs.
   pinMode(gpsLedPin, OUTPUT);
   digitalWrite(gpsLedPin, LOW);
   pinMode(wifiLedPin, OUTPUT);
@@ -151,16 +159,17 @@ void setup() {
   pinMode(trackingLedPin, OUTPUT);
   digitalWrite(trackingLedPin, LOW);
 
+  // Mount the file system
   if (!LittleFS.begin()) {
     Serial.println("LittleFS Mount Failed");
     return;
   }
   
-  // Initialize GPS serial.
+  // Initialize GPS serial connection.
   gpsSerial.begin(9600, SERIAL_8N1, 16, 17);
   Serial.println("GPS module started");
 
-  // Check WiFi credentials.
+  // Start WiFi: if credentials are missing, force AP mode.
   if (wifiSsid.length() == 0 || wifiPassword.length() == 0) {
     Serial.println("No WiFi credentials provided, forcing AP mode");
     startAccessPoint();
@@ -168,19 +177,21 @@ void setup() {
     startClientWiFi();
   }
 
-  // Start the web server.
+  // Start the web server and log startup event.
   startWebServer();
   logEvent("System started");
 }
 
-// --- Main Loop ---
+// ----------------------
+// Main Loop
+// ----------------------
 void loop() {
   while (gpsSerial.available()) {
     char c = gpsSerial.read();
     gps.encode(c);
   }
   
-  // No additional NTP update is necessary here since configTime() has set the system clock.
+  // No need to call getLocalTime() explicitly here; it's used on demand in logEvent().
   
   if (gps.location.isUpdated()) {
     double currentLat = gps.location.lat();
@@ -191,8 +202,8 @@ void loop() {
     float distanceFromHome = getDistance(currentLat, currentLon, homeZoneLat, homeZoneLon);
     updateWiFiMode(distanceFromHome);
     
+    // Auto Tracking mode: automatically start or stop tracking based on distance.
     if (autoTracking) {
-      // Auto tracking: start when leaving home.
       if (distanceFromHome > triggerRadiusKm && !hasLeftHome) {
         logEvent("Left home zone; auto starting tracking");
         hasLeftHome = true;
@@ -204,7 +215,6 @@ void loop() {
         lastLogTime = millis();
         pointCount = 1;
       }
-      // Auto tracking: stop when returning home.
       if (distanceFromHome < triggerRadiusKm && isTracking) {
         logEvent("Returned home; auto stopping tracking");
         if (gpxFile) {
@@ -220,9 +230,10 @@ void loop() {
       }
     }
     
+    // Log new GPX points at defined intervals when tracking.
     if (isTracking && (millis() - lastLogTime > logInterval)) {
       float incDistance = getDistance(lastLat, lastLon, currentLat, currentLon);
-      if (incDistance > 0.005) {  // 5-meter threshold.
+      if (incDistance > 0.005) {  // Only log if movement exceeds a threshold
         totalDistance += incDistance;
         if (currentSpeed > maxSpeed) maxSpeed = currentSpeed;
         avgSpeed = totalDistance / ((millis() - trackingStartTime) / 3600000.0);
@@ -251,6 +262,7 @@ void loop() {
   if (wifiConnected)
     server.handleClient();
   
+  // Update status LEDs
   updateGPSLed();
   updateWiFiLed();
   if (isTracking)
@@ -261,12 +273,15 @@ void loop() {
   delay(1);
 }
 
-// --- Supporting Functions ---
+// ----------------------
+// Utility Functions
+// ----------------------
 
+// Compute the great-circle distance between two points (in kilometers)
 float getDistance(double lat1, double lon1, double lat2, double lon2) {
-  const double R = 6371.0;
+  const double R = 6371.0;  // Earth radius in km
   double dLat = radians(lat2 - lat1);
-  double dLon = radians(lat2 - lat1);
+  double dLon = radians(lon2 - lon1);
   double a = sin(dLat/2) * sin(dLat/2) +
              cos(radians(lat1)) * cos(radians(lat2)) *
              sin(dLon/2) * sin(dLon/2);
@@ -274,10 +289,12 @@ float getDistance(double lat1, double lon1, double lat2, double lon2) {
   return R * c;
 }
 
+// Update WiFi mode based on distance from home
 void updateWiFiMode(float distanceFromHome) {
   if (millis() - lastModeSwitchTime < modeSwitchInterval)
     return;
   
+  // If WiFi credentials are missing, force AP mode.
   if (wifiSsid.length() == 0 || wifiPassword.length() == 0) {
     if (!inAPMode) {
       startAccessPoint();
@@ -286,6 +303,7 @@ void updateWiFiMode(float distanceFromHome) {
     return;
   }
   
+  // When within home zone, try to connect as Station.
   if (distanceFromHome < triggerRadiusKm) {
     if (inAPMode && !stationConnectFailure) {
       WiFi.disconnect(true);
@@ -296,7 +314,9 @@ void updateWiFiMode(float distanceFromHome) {
     } else if (!wifiConnected && !stationConnectFailure) {
       startClientWiFi();
     }
-  } else {
+  }
+  // When outside home zone, switch to AP mode.
+  else {
     if (!inAPMode) {
       if (wifiConnected && !inAPMode) {
         WiFi.disconnect(true);
@@ -308,6 +328,7 @@ void updateWiFiMode(float distanceFromHome) {
   }
 }
 
+// Attempt WiFi connection in Station mode.
 void startClientWiFi() {
   lastModeSwitchTime = millis();
   WiFi.mode(WIFI_STA);
@@ -339,6 +360,7 @@ void startClientWiFi() {
   }
 }
 
+// Configure the ESP32 as a WiFi Access Point.
 void startAccessPoint() {
   lastModeSwitchTime = millis();
   WiFi.mode(WIFI_AP);
@@ -349,6 +371,7 @@ void startAccessPoint() {
   inAPMode = true;
 }
 
+// Create a new GPX file for logging a new tracking session.
 void createNewGpx() {
   int year = gps.date.year();
   if (year < 100) year += 2000;
@@ -356,7 +379,6 @@ void createNewGpx() {
   int day = gps.date.day();
   int hour = gps.time.hour();
   int minute = gps.time.minute();
-  
   char filename[30];
   sprintf(filename, "Track_%02d.%02d.%04d-%02d-%02d.gpx", day, month, year, hour, minute);
   currentGpxFilename = String(filename);
@@ -377,6 +399,7 @@ void createNewGpx() {
   Serial.println(currentGpxFilename);
 }
 
+// Write a GPX track point with the given parameters.
 void writeGpxPoint(double lat, double lon, int y, int m, int d, int h, int min, int s, double alt) {
   char timeStr[25];
   sprintf(timeStr, "%04d-%02d-%02dT%02d:%02d:%02dZ", y, m, d, h, min, s);
@@ -397,6 +420,7 @@ void writeGpxPoint(double lat, double lon, int y, int m, int d, int h, int min, 
   }
 }
 
+// Log an event with a timestamp using NTP/local time if available.
 void logEvent(String message) {
   File logFile = LittleFS.open("/log.txt", "a");
   if (logFile) {
@@ -416,6 +440,7 @@ void logEvent(String message) {
   }
 }
 
+// Read the entire contents of the log file.
 String readLogFile() {
   String logContent = "";
   File logFile = LittleFS.open("/log.txt", "r");
@@ -430,11 +455,11 @@ String readLogFile() {
   return logContent;
 }
 
+// Delete the log file, then create a new empty log.
 void clearLog() {
   if (LittleFS.exists("/log.txt")) {
     LittleFS.remove("/log.txt");
   }
-  // Optionally recreate an empty log file:
   File logFile = LittleFS.open("/log.txt", "w");
   if (logFile) {
     logFile.println("Log cleared.");
@@ -442,6 +467,7 @@ void clearLog() {
   }
 }
 
+// Retrieve a list of GPX track files as HTML buttons for download and deletion.
 String getTrackList() {
   String list = "";
   File root = LittleFS.open("/");
@@ -469,6 +495,7 @@ String getTrackList() {
   return list;
 }
 
+// Delete all GPX track files and log each deletion.
 void clearTracks() {
   File root = LittleFS.open("/");
   if (!root) {
@@ -493,6 +520,7 @@ void clearTracks() {
   }
 }
 
+// Handle file download requests for GPX tracks.
 void handleDownload() {
   if (server.hasArg("file")) {
     String fileName = server.arg("file");
@@ -512,6 +540,9 @@ void handleDownload() {
   server.send(400, "text/html", buildPage("Download", "<p>No file specified.</p>"));
 }
 
+// ----------------------
+// LED Update Functions
+// ----------------------
 void updateGPSLed() {
   const uint16_t* pattern;
   uint8_t patternLen;
@@ -563,6 +594,9 @@ void updateTrackingLed() {
   }
 }
 
+// ----------------------
+// ADC and Log File Functions
+// ----------------------
 float readBatteryVoltage() {
   const int numReadings = 10;
   long total = 0;
@@ -626,6 +660,9 @@ void saveHomeConfig() {
   Serial.println("Saved Home configuration: " + String(homeZoneLat, 6) + ", " + String(homeZoneLon, 6));
 }
 
+// ----------------------
+// Web Server and Endpoints
+// ----------------------
 void startWebServer() {
   // Endpoint to serve GPX files for download.
   server.on("/download", HTTP_GET, handleDownload);
@@ -637,7 +674,7 @@ void startWebServer() {
     server.send(200, "text/html", html);
   });
   
-  // Endpoint to delete the log file.
+  // Endpoint to delete (clear) the log file.
   server.on("/deleteLog", HTTP_GET, [](){
     clearLog();
     server.sendHeader("Location", "/log", true);
@@ -655,14 +692,14 @@ void startWebServer() {
 #endif
     unsigned long durationSec = isTracking ? ((millis() - trackingStartTime) / 1000) : 0;
     
-    // Build Tracking button (manual toggle).
+    // Build manual tracking toggle button.
     String trackButton;
     if (isTracking)
       trackButton = "<a href='/toggleTracking' class='button' style='background-color:red;'>Tracking: On</a>";
     else
       trackButton = "<a href='/toggleTracking' class='button' style='background-color:green;'>Tracking: Off</a>";
     
-    // Build Auto Tracking toggle button.
+    // Build auto tracking toggle button.
     String autoTrackButton;
     if (autoTracking)
       autoTrackButton = "<a href='/toggleAutoTrack' class='button' style='background-color:red;'>Auto Tracking: On</a>";
@@ -743,7 +780,7 @@ void startWebServer() {
     server.send(200, "text/html", html);
   });
   
-  // Endpoint to set home point.
+  // Endpoint to set home point using current GPS fix.
   server.on("/setHome", HTTP_GET, [](){
     String body;
     if (gps.location.isValid()) {
@@ -758,7 +795,7 @@ void startWebServer() {
     server.send(200, "text/html", buildPage("Set Home", body));
   });
   
-  // Endpoint to toggle tracking (manual control).
+  // Endpoint for manual tracking toggle.
   server.on("/toggleTracking", HTTP_GET, [](){
     if (isTracking) {
       logEvent("Manual stop tracking triggered");
@@ -792,7 +829,7 @@ void startWebServer() {
     server.send(302, "text/plain", "Redirecting...");
   });
   
-  // Endpoint to display WiFi config form.
+  // Endpoint to display the WiFi configuration form.
   server.on("/wifiConfig", HTTP_GET, [](){
     String body;
     body = "<form action='/saveWifi' method='POST'>";
