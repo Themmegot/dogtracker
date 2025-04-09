@@ -1,71 +1,73 @@
 # Dog Tracker Project
 
-A GPS-based dog tracker built on an ESP32 that logs location data to GPX files, monitors battery status, and provides an interactive web dashboard for controlling features such as tracking start/stop, auto-stop toggling, and Wi-Fi configuration.
+The Dog Tracker Project is an ESP32-based GPS tracking system that logs location data in GPX format and provides a comprehensive web dashboard for real-time monitoring and control. The tracker can automatically start when leaving home and stop when returning (Auto Tracking mode) or be controlled manually. It also monitors battery voltage and logs events with human-readable date/time stamps obtained via NTP (or GPS if needed).
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Features](#features)
 - [Hardware Requirements](#hardware-requirements)
-- [Circuit Diagram & Wiring](#circuit-diagram--wiring)
+- [Circuit Diagram and Wiring](#circuit-diagram-and-wiring)
 - [Software and Libraries](#software-and-libraries)
 - [Installation and Setup](#installation-and-setup)
+- [Usage](#usage)
 - [Web Interface Endpoints](#web-interface-endpoints)
-- [Calibration and Configuration](#calibration-and-configuration)
+- [Flash Endurance Considerations](#flash-endurance-considerations)
 - [Future Improvements](#future-improvements)
 - [License](#license)
 
 ## Overview
 
-The Dog Tracker is designed to monitor the location of your dog in real time using a GPS module, log the track in GPX format, and provide control over tracking features via a built-in web server on the ESP32. The device automatically switches between Station mode (connecting to a home Wi-Fi network) and Access Point (AP) mode (when away from home or if Wi-Fi credentials are not set), ensuring you can always connect and manage the tracker.
+The Dog Tracker Project is designed to monitor your dog's location using a GPS module, log the route as GPX files, and provide a user-friendly web dashboard for managing tracking, configuring Wi-Fi, and viewing event logs. It supports two tracking modes:
+
+- **Auto Tracking:** Automatically starts tracking when the device leaves the home zone and stops when it returns.
+- **Manual Tracking:** Allows you to start or stop tracking with a dedicated button when Auto Tracking is disabled.
 
 ## Features
 
-- **GPS Tracking:**  
-  - Continuously reads GPS data using TinyGPS++.
-  - Logs GPX track points with latitude, longitude, elevation, and timestamps.
-  
-- **Wi-Fi Modes:**  
-  - Automatically switches between Station and AP modes based on GPS location (home zone defined by a trigger radius) and the availability of Wi-Fi credentials.
-  - Includes a dwell interval (15 seconds) between mode switches and limits repeated connection attempts with a failure flag.
+- **GPS Tracking and GPX Logging:**  
+  - Reads GPS data using TinyGPS++.
+  - Logs data (latitude, longitude, elevation, timestamp) in GPX format.
+
+- **Dual Tracking Modes:**  
+  - **Auto Tracking:** Automatically controls tracking based on distance from home.
+  - **Manual Tracking:** Toggle tracking on/off manually.
+  - Dashboard buttons display clear labels and colors:
+    - **Tracking:** "Tracking: On" (red) when active, and "Tracking: Off" (green) when off.
+    - **Auto Tracking:** "Auto Tracking: On" (red) when enabled, and "Auto Tracking: Off" (green) when disabled.
 
 - **Web Dashboard:**  
-  - Displays tracking statistics (distance, speed, elevation, GPS coordinates, battery voltage, Wi-Fi status, etc.).
-  - Interactive controls:
-    - **Set Home:** Set the home location based on the current GPS fix.
-    - **Track/Tracking Toggle:** Button displays "Track" (green) when not tracking and "Tracking" (red) when active.
-    - **AutoStop Toggle:** Button toggles auto-stop tracking (stopping tracking when near home) and displays "AutoStop: On" (orange) or "AutoStop: Off" (light blue).
-    - **Wi-Fi Config:** Configure and save Wi-Fi credentials.
-  - Track files appear as download links and are accompanied by "Delete" buttons. A "Delete All Tracks" button is also provided.
+  - Displays real-time stats such as distance, speed, elevation gain, GPS coordinates, battery voltage, and Wi-Fi mode.
+  - Provides buttons for setting home location, configuring Wi-Fi, viewing/deleting log files, and managing GPX tracks.
+  
+- **Log File Management:**  
+  - Logs events with human-readable date/time stamps (sourced via NTP or GPS).
+  - Web endpoints allow you to view and clear the log file.
 
 - **Battery Monitoring:**  
-  - Measures battery voltage via an external voltage divider connected to an ADC pin (e.g., GPIO33).
-  - Displays the battery voltage on the dashboard.
-
-- **LED Indicators:**  
-  - **GPS LED (GPIO12):** Blinks based on GPS fix status.
-  - **Wi-Fi LED (GPIO13):** Indicates Wi-Fi mode (AP vs. Station) with different blink patterns.
-  - **Tracking LED (GPIO15 or 27):** Blinks when tracking is active (two blinks every 5 seconds) and stays off when not tracking.
-
-- **Persistent Configuration:**  
-  - Uses the ESP32 Preferences library to store Wi-Fi credentials and the home location across reboots.
+  - Uses an ADC input and a voltage divider to measure battery voltage.
+  
+- **Wi-Fi Connectivity:**  
+  - Automatically switches between Station (connecting to home Wi-Fi) and Access Point modes based on configuration and location.
 
 ## Hardware Requirements
 
-- **Microcontroller:** ESP32 (e.g., Adafruit ESP32 Feather Huzzah)
-- **GPS Module:** (Compatible with ESP32 and TinyGPS++; e.g., NEO-6M)
+- **Microcontroller:** ESP32 board (e.g., Adafruit ESP32 Feather Huzzah)
+- **GPS Module:** Compatible with ESP32 and TinyGPS++ (e.g., NEO-6M)
 - **Power Supply:**  
-  - A LiPo battery (e.g., 3.87 V, 930 mAh) with onboard charger circuitry.
+  - LiPo battery (e.g., 3.87 V, 930 mAh) with appropriate charging circuitry
 - **Voltage Divider:**  
-  - Two resistors (e.g., R1 = 100 kΩ and R2 = 47 kΩ, or as measured/calibrated) for stepping down the battery voltage.
+  - Two resistors (e.g., R1 = 100 kΩ, R2 = 47 kΩ) for scaling battery voltage to an ADC-safe level
 - **LEDs:**  
-  - Three status LEDs with current-limiting resistors for GPS, Wi-Fi, and Tracking indicators.
-- **Additional Components:**  
-  - Connecting wires, breadboard or perfboard for prototyping.
+  - Status LEDs for GPS (GPIO12), Wi-Fi (GPIO13), and Tracking (GPIO15) with current-limiting resistors
+- **Additional:**  
+  - Necessary wiring and a breadboard or perfboard for prototyping
 
-## Circuit Diagram & Wiring
+## Circuit Diagram and Wiring
 
 ### Battery Voltage Divider
+
+To measure the battery voltage, the battery is connected through a voltage divider. For example:
 
 ```
    + (Battery Positive)
@@ -79,106 +81,93 @@ The Dog Tracker is designed to monitor the location of your dog in real time usi
    GND (Battery Negative)
 ```
 
-*Ensure that the ADC pin is connected to the junction between R1 and R2, and that the battery ground is common with the ESP32 ground.*
+> **Tip:** Place the diagram in a code block as shown above for proper formatting.
 
 ### LED Connections
 
-- **GPS LED (GPIO12):** Connect the LED (with resistor) between GPIO12 and ground.
-- **Wi-Fi LED (GPIO13):** Connect the LED (with resistor) between GPIO13 and ground.
-- **Tracking LED (e.g., GPIO15 or GPIO27):** Connect the LED (with resistor) between the chosen pin and ground.
+- **GPS LED:** Connect to GPIO12 (with resistor) to ground.
+- **Wi-Fi LED:** Connect to GPIO13 (with resistor) to ground.
+- **Tracking LED:** Connect to GPIO15 (with resistor) to ground.
+
+Ensure a common ground between all components.
 
 ## Software and Libraries
 
-The project is based on the Arduino framework for ESP32. The following libraries are used:
+The project is developed using the Arduino framework for ESP32. The following libraries are used:
+
 - **WiFi.h** — For Wi-Fi connectivity.
-- **LittleFS.h** — For file system operations (storing GPX logs and configuration).
+- **LittleFS.h** — For file system operations.
 - **TinyGPS++.h** — For parsing GPS data.
-- **WebServer.h** — To host the web dashboard.
-- **Preferences.h** — For persistent configuration storage.
-- **vector (STL)** — Used for file management within LittleFS.
+- **WebServer.h** — For hosting the dashboard.
+- **Preferences.h** — For persistent configuration.
+- **time.h** — For time functions (NTP configuration via `configTime()`).
 
 ## Installation and Setup
 
-1. **Clone or Download the Code:**  
-   Clone the repository or download the source files from GitHub.
+1. **Install the Arduino IDE and ESP32 Board Support:**  
+   Follow the [ESP32 installation guide](https://docs.espressif.com/projects/arduino-esp32/en/latest/esp32/getting_started.html).
 
-2. **Install the Arduino IDE and ESP32 Support:**  
-   Ensure you have the Arduino IDE with ESP32 board support installed.  
-   Install required libraries via the Library Manager.
+2. **Clone or Download the Repository:**  
+   Save the project source code to your local machine.
 
-3. **Assemble the Hardware:**  
-   Wire the GPS module, battery, voltage divider, and LEDs according to the schematic.
+3. **Install Required Libraries:**  
+   Use the Arduino Library Manager to install the libraries listed above.
 
-4. **Upload the Code:**  
-   Open the sketch in the Arduino IDE, select your board (e.g., Adafruit ESP32 Feather Huzzah), and upload the code.
+4. **Hardware Assembly:**  
+   Wire the ESP32, GPS module, voltage divider, LEDs, and battery according to the provided schematic.
 
-5. **Test the Tracker:**  
-   Access the web dashboard through the assigned IP address to view tracking data, adjust settings, and download GPX files.
+5. **Upload the Code:**  
+   Open the sketch in the Arduino IDE, select your board, and upload the code.
+
+## Usage
+
+- **Setting Home:**  
+  Use the "Set Home" button on the dashboard to capture your current GPS location as the home area.
+  
+- **Tracking Modes:**  
+  - **Auto Tracking:**  
+    When enabled, the tracker automatically starts recording once it leaves the home area and stops when returning.
+  - **Manual Tracking:**  
+    When auto tracking is disabled, you can toggle tracking on/off using the "Tracking: Off/On" button.
+
+- **Viewing and Managing Logs:**  
+  - Click "View Log" on the dashboard to see log entries with human-readable timestamps.
+  - Use "Delete Log" on the log page to clear all log entries.
+
+- **File Management:**  
+  - Download or delete individual GPX track files from the dashboard.
+  - Use "Delete All Tracks" to clear all logged tracks.
 
 ## Web Interface Endpoints
 
-- **Dashboard (`/`):**  
-  Displays current stats, including distance, speed, elevation, coordinates, battery voltage, Wi-Fi mode, and more.  
-  Contains buttons for:
-  - **Set Home:** Set the home location using the current GPS fix.
-  - **Track/Tracking Toggle:** Toggles tracking manually. Displays "Track" (green) when off and "Tracking" (red) when on.
-  - **AutoStop Toggle:** Toggles auto-stop tracking (stops tracking automatically when in the home zone).
-  - **Wi-Fi Config:** Update Wi-Fi credentials.
+- **/** – Dashboard: Displays tracking data, battery voltage, and control buttons.
+- **/setHome** – Sets the current GPS position as home.
+- **/toggleTracking** – Toggles manual tracking (if auto tracking is off).
+- **/toggleAutoTrack** – Toggles the Auto Tracking feature.
+- **/wifiConfig** & **/saveWifi** – Configure Wi-Fi credentials.
+- **/log** – Displays the log file with timestamps.
+- **/deleteLog** – Clears the log file.
+- **/download?file=<filename>** – Downloads a GPX track file.
+- **/deleteTrack?file=<filename>** – Deletes a specific GPX track file.
+- **/clearTracks** – Deletes all GPX track files.
 
-- **Download Track (`/download?file=<filename>`):**  
-  Serves a GPX file for download with the filename specified in the URL.
+## Flash Endurance Considerations
 
-- **Delete Single Track (`/deleteTrack?file=<filename>`):**  
-  Deletes the specified GPX file and redirects back to the dashboard.
-
-- **Delete All Tracks (`/clearTracks`):**  
-  Deletes all GPX files from the file system and redirects back to the dashboard.
-
-- **Set Home (`/setHome`):**  
-  Reads the current GPS fix and saves the coordinates as the home location.
-
-- **Toggle Tracking (`/toggleTracking`):**  
-  Starts or stops tracking. The button label and colour change based on the current state.
-
-- **Toggle AutoStop (`/toggleAutoStop`):**  
-  Toggles the autoStopTracking flag. When enabled, tracking stops automatically upon returning home.
-
-- **Wi-Fi Config (`/wifiConfig`):**  
-  Displays a form for updating Wi-Fi credentials.
-
-- **Save Wi-Fi (`/saveWifi`):**  
-  Saves the updated Wi-Fi credentials to persistent storage.
-
-Actions (toggle, delete, etc.) redirect back to the dashboard automatically.
-
-## Calibration and Configuration
-
-- **ADC Calibration:**  
-  Use the resistor values in your voltage divider to set the scaling factor. If your divider doesn’t match the nominal values, adjust the `scalingFactor` accordingly.
-
-- **Persistent Settings:**  
-  Wi-Fi credentials and the home location are stored using the Preferences library. They are loaded on startup and can be updated via the web interface.
-
-- **Wi-Fi Mode Switching:**  
-  Based on the current GPS location and the value of `triggerRadiusKm`, the device switches between Station mode (for home) and AP mode (for remote tracking). A 15-second dwell time prevents rapid changes, and a failure flag stops repeated unsuccessful connection attempts.
+The ESP32’s flash typically endures 10,000–100,000 write cycles per sector. Using LittleFS with wear leveling helps distribute writes. Under normal usage conditions—like periodic logging—the system should last months or years before reaching the flash endurance limit.
 
 ## Future Improvements
 
 - **Enhanced ADC Calibration:**  
-  Incorporate averaging and a two-point calibration process for improved battery voltage accuracy.
-- **Advanced File Management:**  
-  Improve GPX log handling with features such as file renaming, archiving, or cloud backups.
+  Improve battery voltage accuracy with advanced calibration techniques or buffer samples.
+- **File Management Enhancements:**  
+  Add features such as file archiving, renaming, or integration with cloud storage.
 - **Dashboard Enhancements:**  
-  Add graphs or historical data on the web dashboard for battery life, GPS location, or speed.
-- **Mobile Integration:**  
-  Consider creating a companion mobile app for more convenient monitoring and control.
-- **Low-Power Modes:**  
-  Implement sleep modes or other power management features to extend battery life.
+  Incorporate mapping, graphing, and historical data visualization.
+- **Mobile App Integration:**  
+  Develop a companion app for easier remote monitoring.
+- **Power Optimization:**  
+  Implement low-power modes to extend battery life.
 
 ## License
 
-[MIT License](LICENSE)
-
----
-
-Feel free to adjust this documentation to suit your project. Happy coding!
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
